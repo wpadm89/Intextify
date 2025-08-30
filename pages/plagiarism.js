@@ -1,17 +1,42 @@
 import { useState } from "react";
+import QuotaBar from "../components/QuotaBar";
 
 export default function Plagiarism() {
   const [text, setText] = useState("");
   const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   async function handleCheck() {
-    const res = await fetch("/api/plagiarism", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    const data = await res.json();
-    setResult(data);
+    setError("");
+    if (!text.trim()) {
+      setError("⚠️ Please enter some text.");
+      return;
+    }
+    if (text.length > 2000) {
+      setError("⚠️ Max 2000 characters allowed.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/plagiarism", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      if (res.status === 429) {
+        setError("⚠️ Too many requests, slow down.");
+        setLoading(false);
+        return;
+      }
+
+      const data = await res.json();
+      setResult(data);
+    } catch (err) {
+      setError("❌ Something went wrong, try again.");
+    }
+    setLoading(false);
   }
 
   return (
@@ -28,14 +53,15 @@ export default function Plagiarism() {
         onClick={handleCheck}
         className="bg-red-600 text-white px-4 py-2 rounded"
       >
-        Check Plagiarism
+        {loading ? "Checking..." : "Check Plagiarism"}
       </button>
+      {error && <p className="text-red-600 mt-2">{error}</p>}
       {result && (
         <div className="mt-4 p-4 bg-gray-50 rounded">
           <h3 className="font-semibold mb-2">Result:</h3>
           {result.plagiarism ? (
             <p className="text-red-600">
-              ⚠️ Possible plagiarism detected. Similarity Score:{" "}
+              ⚠️ Possible plagiarism detected. Score:{" "}
               {result.similarityScore.toFixed(2)} <br />
               Matched Text: "{result.matchedText}"
             </p>

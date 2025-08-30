@@ -1,60 +1,86 @@
-import OpenAI from "openai";
+import { useState } from "react";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+export default function Plagiarism() {
+  const [text, setText] = useState("");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [quota, setQuota] = useState(null);
 
-// Example dataset (replace with a database in production)
-const referenceTexts = [
-  "Artificial Intelligence is transforming industries worldwide.",
-  "The quick brown fox jumps over the lazy dog.",
-  "OpenAI develops cutting-edge AI tools for the future."
-];
-
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).end();
-
-  const { text } = req.body;
-
-  if (!text) return res.status(400).json({ error: "No text provided" });
-
-  try {
-    // Get embedding for input text
-    const inputEmbedding = await client.embeddings.create({
-      model: "text-embedding-3-small",
-      input: text,
-    });
-
-    const inputVector = inputEmbedding.data[0].embedding;
-
-    // Compute similarity (cosine) with references
-    function cosineSimilarity(vecA, vecB) {
-      const dot = vecA.reduce((acc, val, i) => acc + val * vecB[i], 0);
-      const magA = Math.sqrt(vecA.reduce((acc, val) => acc + val * val, 0));
-      const magB = Math.sqrt(vecB.reduce((acc, val) => acc + val * val, 0));
-      return dot / (magA * magB);
+  async function handleCheck() {
+    setError("");
+    if (!text.trim()) {
+      setError("⚠️ Please enter some text.");
+      return;
     }
-
-    let maxScore = 0;
-    let mostSimilar = "";
-
-    for (const ref of referenceTexts) {
-      const refEmbedding = await client.embeddings.create({
-        model: "text-embedding-3-small",
-        input: ref,
+    if (text.length > 2000) {
+      setError("⚠️ Max 2000 characters allowed.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/plagiarism", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
       });
-      const refVector = refEmbedding.data[0].embedding;
-      const score = cosineSimilarity(inputVector, refVector);
-      if (score > maxScore) {
-        maxScore = score;
-        mostSimilar = ref;
-      }
-    }
 
-    res.json({
-      plagiarism: maxScore > 0.85, // threshold for plagiarism
-      similarityScore: maxScore,
-      matchedText: mostSimilar,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+      if (res.status === 429) {
+        const data = await res.json();
+        setError("⚠️ Too many requests, slow down.");
+        setQuota({ remaining: data.remaining, limit: data.limit });
+        setLoading(false);
+        return;
+      }
+
+      const data = await res.json();
+      setResult(data);
+
+      if (data.remaining !== undefined && data.limit !== undefined) {
+        setQuota({ remaining: data.remaining, limit: data.limit });
+      }
+    } catch (err) {
+      setError("❌ Something went wrong, try again.");
+    }
+    setLoading(false);
   }
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold mb-4">Plagiarism Checker</h2>
+      <textarea
+        className="w-full p-3 border rounded mb-4"
+        rows="5"
+        placeholder="Enter text to check for plagiarism..."
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <button
+        onClick={handleCheck}
+        className="bg-red-600 text-white px-4 py-2 rounded"
+      >
+        {loading ? "Checking..." : "Check Plagiarism"}
+      </button>
+      {error && <p className="text-red-600 mt-2">{error}</p>}
+      {quota && (
+        <p className="text-gray-600 text-sm mt-2">
+          Requests left: {quota.remaining} / {quota.limit} this minute
+        </p>
+      )}
+      {result && (
+        <div className="mt-4 p-4 bg-gray-50 rounded">
+          <h3 className="font-semibold mb-2">Result:</h3>
+          {result.plagiarism ? (
+            <p className="text-red-600">
+              ⚠️ Possible plagiarism detected. Score:{" "}
+              {result.similarityScore.toFixed(2)} <br />
+              Matched Text: "{result.matchedText}"
+            </p>
+          ) : (
+            <p className="text-green-600">✅ No plagiarism detected.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
